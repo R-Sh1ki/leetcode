@@ -9,6 +9,7 @@ dependencies = [
     "marimo",
     "python-dotenv>=1.2.3",
     "requests>=2.34.2",
+    "tqdm>=4.70.1",
 ]
 
 [project.scripts]

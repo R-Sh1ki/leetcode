@@ -4,7 +4,7 @@
 # Created Time: 2026-09-16 13:01:05
 # ---------------------------------------------------
 # Modified By: R-Sh1ki
-# Modified Time: 2026-09-16 19:50:53
+# Modified Time: 2026-09-16 23:34:44
 
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from typing import Any
 
 import requests
 from dotenv import load_dotenv
+from tqdm.auto import tqdm
 
 base_url = "https://leetcode.cn"
 graphQL_url = f"{base_url}/graphql"
@@ -59,6 +60,48 @@ query questionData($titleSlug: String!) {
     enableRunCode
 
     __typename
+  }
+}
+"""
+
+problem_list_query = """
+query problemsetQuestionListV2(
+  $filters: QuestionFilterInput,
+  $limit: Int,
+  $searchKeyword: String,
+  $skip: Int,
+  $sortBy: QuestionSortByInput,
+  $categorySlug: String
+) {
+  problemsetQuestionListV2(
+    filters: $filters
+    limit: $limit
+    searchKeyword: $searchKeyword
+    skip: $skip
+    sortBy: $sortBy
+    categorySlug: $categorySlug
+  ) {
+    questions {
+      id
+      questionFrontendId
+      title
+      translatedTitle
+      titleSlug
+      paidOnly
+      difficulty
+
+      topicTags {
+        name
+        slug
+        nameTranslated
+      }
+
+      status
+    }
+
+    totalLength
+    finishedLength
+    hasMore
   }
 }
 """
@@ -242,3 +285,70 @@ class LeetCodeClient:
             raise RuntimeError(f"Missing interpret id: {payload}")
 
         return self.wait_for_submission(interpret_id)
+
+    def fetch_problem_list(self, *, skip: int = 0, limit: int = 100) -> dict:
+        response = self.session.post(
+            graphQL_url,
+            json={
+                "operationName": "problemsetQuestionListV2",
+                "variables": {
+                    "filters": {"filterCombineType": "ALL"},
+                    "limit": limit,
+                    "searchKeyword": "",
+                    "skip": skip,
+                    "sortBy": {
+                        "sortField": "CUSTOM",
+                        "sortOrder": "ASCENDING",
+                    },
+                    "categorySlug": "",
+                },
+                "query": problem_list_query,
+            },
+            timeout=self.timeout,
+        )
+
+        if not response.ok:
+            raise RuntimeError(
+                "LeetCode problem list request failed\n"
+                f"status: {response.status_code}\n"
+                f"response: {response.text}"
+            )
+
+        payload = response.json()
+
+        if errors := payload.get("errors"):
+            raise RuntimeError(f"LeetCode GraphQL error: {errors}")
+
+        return payload["data"]["problemsetQuestionListV2"]
+
+    def fetch_all_problems(self, *, batch_size: int = 100) -> list[dict]:
+        problems = []
+
+        skip = 0
+        progress = None
+
+        while True:
+            data = self.fetch_problem_list(skip=skip, limit=batch_size)
+
+            questions = data["questions"]
+
+            if not questions:
+                break
+
+            if progress is None:
+                progress = tqdm(
+                    total=data["totalLength"],
+                    desc="Fetching problems",
+                    unit="problem",
+                )
+
+            problems.extend(questions)
+
+            progress.update(len(questions))
+
+            if not data["hasMore"]:
+                break
+
+            skip += batch_size
+
+        return problems

@@ -4,7 +4,7 @@
 # Created Time: 2026-09-16 17:48:22
 # ---------------------------------------------------
 # Modified By: R-Sh1ki
-# Modified Time: 2026-09-16 21:36:31
+# Modified Time: 2026-09-16 23:38:37
 
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ import textwrap
 from typing import Any
 
 from . import cache
+from .cache import problemsDir
+from .catalog import Catalog
 from .client import LeetCodeClient
 from .problem import Problem
 from .testcase import TestCase, parse_value
@@ -23,6 +25,8 @@ from .testcase import TestCase, parse_value
 class LeetCode:
     def __init__(self) -> None:
         self.client = LeetCodeClient()
+
+        self.catalog = Catalog(problemsDir / "catalog.json")
 
     def get_problem(self, slug: str, *, refresh: bool = False) -> Problem:
         if cache.exists(slug) and not refresh:
@@ -260,3 +264,14 @@ class LeetCode:
         )
 
         return self._add_testcase(problem, testcase)
+
+    def sync_catalog(self) -> Catalog:
+        questions = self.client.fetch_all_problems()
+
+        self.catalog.build(questions)
+
+        print(f"Problems: {len(self.catalog.problems)}")
+        print(f"Tags: {len(self.catalog.tags)}")
+        print(f"Solved: {len(self.catalog.solved())}")
+
+        return self.catalog
