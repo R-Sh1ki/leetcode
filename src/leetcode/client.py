@@ -15,7 +15,6 @@ from typing import Any
 
 import requests
 from dotenv import load_dotenv
-from tqdm.auto import tqdm
 
 base_url = "https://leetcode.cn"
 graphQL_url = f"{base_url}/graphql"
@@ -320,35 +319,3 @@ class LeetCodeClient:
             raise RuntimeError(f"LeetCode GraphQL error: {errors}")
 
         return payload["data"]["problemsetQuestionListV2"]
-
-    def fetch_all_problems(self, *, batch_size: int = 100) -> list[dict]:
-        problems = []
-
-        skip = 0
-        progress = None
-
-        while True:
-            data = self.fetch_problem_list(skip=skip, limit=batch_size)
-
-            questions = data["questions"]
-
-            if not questions:
-                break
-
-            if progress is None:
-                progress = tqdm(
-                    total=data["totalLength"],
-                    desc="Fetching problems",
-                    unit="problem",
-                )
-
-            problems.extend(questions)
-
-            progress.update(len(questions))
-
-            if not data["hasMore"]:
-                break
-
-            skip += batch_size
-
-        return problems

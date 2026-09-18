@@ -4,7 +4,7 @@
 # Created Time: 2026-09-16 13:11:37
 # ---------------------------------------------------
 # Modified By: R-Sh1ki
-# Modified Time: 2026-09-16 13:20:27
+# Modified Time: 2026-09-17 14:05:05
 
 
 from __future__ import annotations
@@ -13,19 +13,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-
-def find_project_root() -> Path:
-    current = Path.cwd().resolve()
-
-    for path in [current, *current.parents]:
-        if (path / "pyproject.toml").exists():
-            return path
-
-    raise RuntimeError("Cannot find project root: pyproject.toml not found.")
-
-
-projectRoot = find_project_root()
-problemsDir = projectRoot / "problems"
+from .paths import problemsDir
 
 
 def problem_path(slug: str) -> Path:

@@ -4,12 +4,12 @@
 # Created Time: 2026-09-16 22:24:31
 # ---------------------------------------------------
 # Modified By: R-Sh1ki
-# Modified Time: 2026-09-16 23:24:27
+# Modified Time: 2026-09-18
 
 
 from __future__ import annotations
 
-import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -17,125 +17,164 @@ from typing import Any
 class Catalog:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
-
-        self.problems: dict[str, dict[str, Any]] = {}
-        self.tags: dict[str, list[str]] = {}
-
-        self.load()
-
-    def load(self) -> None:
-        if not self.path.exists():
-            return
-
-        data = json.loads(self.path.read_text(encoding="utf-8"))
-
-        self.problems = data.get("problems", {})
-        self.tags = data.get("tags", {})
-
-    def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "problems": self.problems,
-            "tags": self.tags,
-        }
 
-        self.path.write_text(
-            json.dumps(
-                data,
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+        self.connection = sqlite3.connect(self.path)
+        self.connection.row_factory = sqlite3.Row
+
+        self._create_tables()
+
+    def _create_tables(self) -> None:
+        self.connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS problems (
+                id TEXT PRIMARY KEY,
+                slug TEXT UNIQUE NOT NULL,
+                title TEXT NOT NULL,
+                difficulty TEXT NOT NULL,
+                paid_only INTEGER NOT NULL,
+                remote_status TEXT NOT NULL,
+                archived INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS topics (
+                slug TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                translated_name TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS problem_topics (
+                problem_id TEXT NOT NULL,
+                topic_slug TEXT NOT NULL,
+                PRIMARY KEY (problem_id, topic_slug),
+                FOREIGN KEY (problem_id) REFERENCES problems(id),
+                FOREIGN KEY (topic_slug) REFERENCES topics(slug)
+            );
+            """
         )
 
-    def build(self, questions: list[dict]) -> None:
-        self.problems = {}
-        self.tags = {}
+    def build(self, questions: list[dict[str, Any]]) -> None:
+        archived = {
+            row["id"]: row["archived"]
+            for row in self.connection.execute(
+                "SELECT id, archived FROM problems"
+            ).fetchall()
+        }
+        problems = []
+        topics = {}
+        problem_topics = []
 
         for question in questions:
             problem_id = str(question["questionFrontendId"])
-            tags = [tag["slug"] for tag in question.get("topicTags", [])]
-            title = question.get("translatedTitle") or question["title"]
-            status = question.get("status") or "TO_DO"
 
-            self.problems[problem_id] = {
-                "slug": question["titleSlug"],
-                "title": title,
-                "difficulty": question["difficulty"],
-                "paidOnly": question.get("PaidOnly", False),
-                "tags": tags,
-                "status": status,
-                "remoteSolved": (question.get("status") == "SOLVED"),
-            }
-
-            for tag in tags:
-                self.tags.setdefault(tag, []).append(problem_id)
-
-        self._sort()
-        self.save()
-
-    def _sort(self) -> None:
-        def problem_sort_key(problem_id: str):
-            try:
-                return (0, int(problem_id))
-            except ValueError:
-                return (1, problem_id)
-
-        self.problems = dict(
-            sorted(
-                self.problems.items(),
-                key=lambda item: problem_sort_key(item[0]),
+            problems.append(
+                (
+                    problem_id,
+                    question["titleSlug"],
+                    question.get("translatedTitle") or question["title"],
+                    question["difficulty"],
+                    question.get("paidOnly", False),
+                    question.get("status") or "TO_DO",
+                    archived.get(problem_id, False),
+                )
             )
-        )
 
-        self.tags = {
-            tag: sorted(
-                problem_ids,
-                key=problem_sort_key,
+            for topic in question.get("topicTags", []):
+                topic_slug = topic["slug"]
+                topics[topic_slug] = (
+                    topic_slug,
+                    topic["name"],
+                    topic.get("nameTranslated") or topic.get("translatedName"),
+                )
+                problem_topics.append((problem_id, topic_slug))
+
+        with self.connection:
+            self.connection.execute("DELETE FROM problem_topics")
+            self.connection.execute("DELETE FROM topics")
+            self.connection.execute("DELETE FROM problems")
+
+            self.connection.executemany(
+                "INSERT INTO problems VALUES (?, ?, ?, ?, ?, ?, ?)",
+                problems,
             )
-            for tag, problem_ids in sorted(self.tags.items())
-        }
+            self.connection.executemany(
+                "INSERT INTO topics VALUES (?, ?, ?)",
+                topics.values(),
+            )
+            self.connection.executemany(
+                "INSERT INTO problem_topics VALUES (?, ?)",
+                problem_topics,
+            )
+
+    def _all(self, query: str, parameters: tuple = ()) -> list[dict]:
+        rows = self.connection.execute(query, parameters).fetchall()
+        return [dict(row) for row in rows]
 
     def get(self, problem_id: str | int) -> dict | None:
-        return self.problems.get(str(problem_id))
+        row = self.connection.execute(
+            "SELECT * FROM problems WHERE id = ?",
+            (str(problem_id),),
+        ).fetchone()
+
+        return dict(row) if row else None
 
     def get_by_slug(self, slug: str) -> dict | None:
-        for problem in self.problems.values():
-            if problem["slug"] == slug:
-                return problem
+        row = self.connection.execute(
+            "SELECT * FROM problems WHERE slug = ?",
+            (slug,),
+        ).fetchone()
 
-        return None
+        return dict(row) if row else None
 
-    def get_by_tag(self, tag: str) -> list[dict]:
-        problem_ids = self.tags.get(
-            tag,
-            [],
+    def get_by_topic(self, topic: str) -> list[dict]:
+        return self._all(
+            """
+            SELECT problems.*
+            FROM problems
+            JOIN problem_topics
+                ON problem_topics.problem_id = problems.id
+            WHERE problem_topics.topic_slug = ?
+            ORDER BY CAST(problems.id AS INTEGER)
+            """,
+            (topic,),
         )
 
-        return [
-            {
-                "id": problem_id,
-                **self.problems[problem_id],
-            }
-            for problem_id in problem_ids
-        ]
-
     def solved(self) -> list[dict]:
-        return [
-            {
-                "id": problem_id,
-                **problem,
-            }
-            for problem_id, problem in self.problems.items()
-            if problem["remoteSolved"]
-        ]
+        return self._all(
+            """
+            SELECT * FROM problems
+            WHERE archived = 1
+            ORDER BY CAST(id AS INTEGER)
+            """
+        )
 
     def unsolved(self) -> list[dict]:
-        return [
-            {
-                "id": problem_id,
-                **problem,
-            }
-            for problem_id, problem in self.problems.items()
-            if not problem["remoteSolved"]
-        ]
+        return self._all(
+            """
+            SELECT * FROM problems
+            WHERE archived = 0
+            ORDER BY CAST(id AS INTEGER)
+            """
+        )
+
+    def remote_solved(self) -> list[dict]:
+        return self._all(
+            """
+            SELECT * FROM problems
+            WHERE remote_status = 'SOLVED'
+            ORDER BY CAST(id AS INTEGER)
+            """
+        )
+
+    def mark_archived(self, slug: str) -> None:
+        with self.connection:
+            self.connection.execute(
+                "UPDATE problems SET archived = 1 WHERE slug = ?",
+                (slug,),
+            )
+
+    def problem_count(self) -> int:
+        return self.connection.execute("SELECT COUNT(*) FROM problems").fetchone()[0]
+
+    def topic_count(self) -> int:
+        return self.connection.execute("SELECT COUNT(*) FROM topics").fetchone()[0]

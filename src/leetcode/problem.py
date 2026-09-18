@@ -64,13 +64,32 @@ class Problem:
     def topics(self) -> list[str]:
         result = []
 
-        for tag in self.data.get("topicTags", []):
-            name = tag.get("name") or tag.get("translatedName")
+        for topic in self.data.get("topicTags", []):
+            name = topic.get("name") or topic.get("translatedName")
 
             if name:
                 result.append(name)
 
         return result
+
+    @property
+    def topic_slugs(self) -> list[str]:
+        return [
+            topic["slug"]
+            for topic in self.data.get("topicTags", [])
+            if topic.get("slug")
+        ]
+
+    def topic_slug(self, name: str) -> str:
+        for topic in self.data.get("topicTags", []):
+            if name in (
+                topic.get("slug"),
+                topic.get("name"),
+                topic.get("translatedName"),
+            ):
+                return topic["slug"]
+
+        raise ValueError(f"{name!r} is not a topic of problem {self.slug}!")
 
     @property
     def sample_test_case(self) -> str:

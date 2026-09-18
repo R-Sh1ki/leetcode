@@ -4,29 +4,32 @@
 # Created Time: 2026-09-16 17:48:22
 # ---------------------------------------------------
 # Modified By: R-Sh1ki
-# Modified Time: 2026-09-16 23:38:37
+# Modified Time: 2026-09-18 12:10:10
 
 
 from __future__ import annotations
 
-import ast
-import inspect
-import textwrap
+from pathlib import Path
 from typing import Any
 
+import marimo as mo
+
 from . import cache
-from .cache import problemsDir
+from .archive import Archive
 from .catalog import Catalog
+from .cell import CellSource
 from .client import LeetCodeClient
+from .paths import catalogPath
 from .problem import Problem
 from .testcase import TestCase, parse_value
 
 
 class LeetCode:
-    def __init__(self) -> None:
+    def __init__(self, notebook: str | Path) -> None:
         self.client = LeetCodeClient()
-
-        self.catalog = Catalog(problemsDir / "catalog.json")
+        self.catalog = Catalog(catalogPath)
+        self.cells = CellSource(notebook)
+        self.archive = Archive()
 
     def get_problem(self, slug: str, *, refresh: bool = False) -> Problem:
         if cache.exists(slug) and not refresh:
@@ -43,19 +46,6 @@ class LeetCode:
         self._init_local_tests(problem)
 
         return problem
-
-    def get_solution_source(self, solution: type) -> str:
-        source = inspect.getsource(solution)
-        source = textwrap.dedent(source)
-
-        tree = ast.parse(source)
-
-        for node in tree.body:
-            if isinstance(node, ast.ClassDef):
-                node.decorator_list = []
-                return ast.unparse(node)
-
-        raise ValueError("Cannot find Solution class source")
 
     def display_result(self, result: dict) -> None:
         status = result.get("status_msg", "Unknown")
@@ -91,9 +81,9 @@ class LeetCode:
             print(f"Runtime error: {runtime_error}")
 
     def submit_problem(
-        self, problem: Problem, solution: type, *, lang: str = "python3"
+        self, problem: Problem, class_name: str = "Solution", lang: str = "python3"
     ) -> dict[str, Any]:
-        code = self.get_solution_source(solution)
+        code = self.cells.get_solution(class_name)
 
         submission_id = self.client.submit_code(
             slug=problem.slug,
@@ -110,6 +100,28 @@ class LeetCode:
             self._save_failed_testcase(problem, result)
 
         return result
+
+    def archive_problem(
+        self,
+        problem: Problem,
+        *,
+        topic: str,
+        note_cell: str = "solution_note",
+        class_name: str = "Solution",
+    ) -> Path:
+        note = self.cells.get_markdown(note_cell)
+        source = self.cells.get_solution(class_name)
+
+        notebook = self.archive.archive(
+            problem,
+            topic,
+            source,
+            note=note,
+        )
+
+        self.catalog.mark_archived(problem.slug)
+
+        return notebook
 
     def cache_example_outputs(self, problem: Problem) -> None:
         if problem.example_outputs:
@@ -265,13 +277,40 @@ class LeetCode:
 
         return self._add_testcase(problem, testcase)
 
-    def sync_catalog(self) -> Catalog:
-        questions = self.client.fetch_all_problems()
+    def sync_catalog(self, batch_size: int = 100) -> Catalog:
+        questions = []
+        skip = 0
+
+        data = self.client.fetch_problem_list(skip=skip, limit=batch_size)
+
+        with mo.status.progress_bar(
+            total=data["totalLength"],
+            title="Syncing catalog",
+            completion_title="Catalog synced",
+        ) as progress:
+            while True:
+                batch = data["questions"]
+
+                if not batch:
+                    break
+
+                questions.extend(batch)
+                progress.update(
+                    len(batch),
+                    subtitle=f"{len(questions)} / {data['totalLength']}",
+                )
+
+                if not data["hasMore"]:
+                    break
+
+                skip += batch_size
+                data = self.client.fetch_problem_list(skip=skip, limit=batch_size)
 
         self.catalog.build(questions)
 
-        print(f"Problems: {len(self.catalog.problems)}")
-        print(f"Tags: {len(self.catalog.tags)}")
-        print(f"Solved: {len(self.catalog.solved())}")
+        print(f"Problems: {self.catalog.problem_count()}")
+        print(f"Topics: {self.catalog.topic_count()}")
+        print(f"Remote solved: {len(self.catalog.remote_solved())}")
+        print(f"Archived: {len(self.catalog.solved())}")
 
         return self.catalog
