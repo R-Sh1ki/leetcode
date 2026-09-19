@@ -4,7 +4,7 @@
 # Created Time: 2026-09-16 17:48:22
 # ---------------------------------------------------
 # Modified By: R-Sh1ki
-# Modified Time: 2026-09-18 12:10:10
+# Modified Time: 2026-09-18 16:32:40
 
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ class LeetCode:
     def __init__(self, notebook: str | Path) -> None:
         self.client = LeetCodeClient()
         self.catalog = Catalog(catalogPath)
-        self.cells = CellSource(notebook)
+        self.notebook = Path(notebook)
         self.archive = Archive()
 
     def get_problem(self, slug: str, *, refresh: bool = False) -> Problem:
@@ -50,9 +50,9 @@ class LeetCode:
     def display_result(self, result: dict) -> None:
         status = result.get("status_msg", "Unknown")
 
-        print(f"Result: {status}")
-
         if status == "Accepted":
+            print("Result: Accepted")
+
             runtime = result.get("status_runtime", "N/A")
             memory = result.get("status_memory", "N/A")
 
@@ -64,26 +64,47 @@ class LeetCode:
 
             return
 
+        failures = {
+            "Wrong Answer": "Wrong answer",
+            "Time Limit Exceeded": "Time limit exceeded",
+            "Memory Limit Exceeded": "Memory limit exceeded",
+            "Runtime Error": "Runtime error",
+            "Compile Error": "Compile error",
+            "Output Limit Exceeded": "Output limit exceeded",
+        }
+
+        print(f"Result: Failed - {failures.get(status, status)}")
+
         testcase = result.get("last_testcase")
         expected = result.get("expected_output")
         actual = result.get("code_output")
 
         if testcase:
-            print(f"Last testcase: {testcase}", end="")
-        if expected:
-            print(f", expected: {expected}", end="")
-        if actual:
-            print(f", output: {actual}", end="")
-        print(".")
+            print(f"Last testcase: {testcase}")
+        if expected is not None:
+            print(f"Expected: {expected}")
+        if actual is not None:
+            print(f"Output: {actual}")
+
+        if status == "Time Limit Exceeded":
+            runtime = result.get("status_runtime")
+            if runtime:
+                print(f"Runtime: {runtime}")
 
         runtime_error = result.get("runtime_error")
         if runtime_error:
-            print(f"Runtime error: {runtime_error}")
+            print(runtime_error)
+
+        compile_error = result.get("full_compile_error") or result.get(
+            "compile_error"
+        )
+        if compile_error:
+            print(compile_error)
 
     def submit_problem(
         self, problem: Problem, class_name: str = "Solution", lang: str = "python3"
     ) -> dict[str, Any]:
-        code = self.cells.get_solution(class_name)
+        code = CellSource(self.notebook).get_solution(class_name)
 
         submission_id = self.client.submit_code(
             slug=problem.slug,
@@ -109,8 +130,9 @@ class LeetCode:
         note_cell: str = "solution_note",
         class_name: str = "Solution",
     ) -> Path:
-        note = self.cells.get_markdown(note_cell)
-        source = self.cells.get_solution(class_name)
+        cells = CellSource(self.notebook)
+        note = cells.get_markdown(note_cell)
+        source = cells.get_solution(class_name)
 
         notebook = self.archive.archive(
             problem,
@@ -212,13 +234,13 @@ class LeetCode:
             ok = actual == testcase.expected
 
             print(f"[{'Pass' if ok else 'Failed'}] case {index} ({testcase.source})")
-            print(f"    input: {testcase.args}, output: {actual}", end="")
+            print(f"    input: {testcase.args}")
+            print(f"    output: {actual}")
 
             if not ok:
-                print(f"expected: {testcase.expected}.")
+                print(f"    expected: {testcase.expected}")
             else:
                 passed += 1
-                print(".")
 
         print(f"{passed}/{len(tests)} passed.")
 

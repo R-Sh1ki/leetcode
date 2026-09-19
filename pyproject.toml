@@ -6,7 +6,8 @@ readme = "README.md"
 authors = [{ name = "R-Sh1ki", email = "ryougi.shiki.kong@outlook.com" }]
 requires-python = ">=3.12"
 dependencies = [
-    "marimo",
+    "httpx>=0.28.1",
+    "marimo[recommended]",
     "markdownify>=1.2.3",
     "polars[pyarrow]>=1.44.2",
     "python-dotenv>=1.2.3",

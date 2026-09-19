@@ -65,7 +65,7 @@ if __name__ == "__main__":
 # >>> leetcode:{problem.slug}
 
 @app.cell(hide_code=True)
-def {name}_problem(mo):
+def problem_{name}(mo):
     mo.md(r"""
 # {problem.id}. {problem.display_title}
 
@@ -75,7 +75,7 @@ def {name}_problem(mo):
 
 
 @app.cell(hide_code=True)
-def {name}_note(mo):
+def note_{name}(mo):
     mo.md(r"""
 {note}
 """)
@@ -83,7 +83,7 @@ def {name}_note(mo):
 
 
 @app.cell(hide_code=True)
-def {name}_code(mo):
+def code_{name}(mo):
     mo.md(r"""
 ```python
 {code}
